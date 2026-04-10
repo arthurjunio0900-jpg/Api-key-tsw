@@ -1,7 +1,22 @@
 const express = require("express");
-const app = express();
+const { Client, GatewayIntentBits } = require("discord.js");
 
+const app = express();
 app.use(express.json());
+
+// ================= DISCORD BOT =================
+
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ]
+});
+
+client.once("ready", () => {
+    console.log("Bot online 🔥");
+});
 
 // ================= BANCO =================
 
@@ -19,7 +34,6 @@ function checkSpam(user) {
 
     let data = requests[user];
 
-    // reset a cada 10s
     if (Date.now() - data.time > 10000) {
         requests[user] = { count: 1, time: Date.now() };
         return false;
@@ -36,7 +50,6 @@ function checkSpam(user) {
 
 // ================= GERAR KEY =================
 
-// normal
 app.get("/gerar", (req, res) => {
     const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
 
@@ -48,12 +61,11 @@ app.get("/gerar", (req, res) => {
     res.json({ key });
 });
 
-// com tempo (ex: /gerar/tempo?duracao=60)
 app.get("/gerar/tempo", (req, res) => {
-    const duracao = parseInt(req.query.duracao); // segundos
+    const duracao = parseInt(req.query.duracao);
 
     if (!duracao) {
-        return res.json({ status: "erro", msg: "coloque ?duracao=tempo" });
+        return res.json({ status: "erro", msg: "use ?duracao=tempo" });
     }
 
     const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -83,12 +95,10 @@ app.post("/verify", (req, res) => {
         return res.json({ status: "invalid" });
     }
 
-    // tempo expirado
     if (keys[key].expires && Date.now() > keys[key].expires) {
         return res.json({ status: "expired" });
     }
 
-    // primeira vez
     if (!keys[key].hwid) {
         keys[key].hwid = hwid;
 
@@ -101,7 +111,6 @@ app.post("/verify", (req, res) => {
         return res.json({ status: "success" });
     }
 
-    // mesmo usuário
     if (keys[key].hwid === hwid) {
         return res.json({ status: "success" });
     }
@@ -129,6 +138,35 @@ app.get("/logs", (req, res) => {
     res.json(logs);
 });
 
+// ================= BOT COMANDOS =================
+
+client.on("messageCreate", async (msg) => {
+    if (msg.author.bot) return;
+
+    if (msg.content === "!gerar") {
+        const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+        keys[key] = {
+            hwid: null,
+            expires: null
+        };
+
+        msg.reply("🔑 Key: " + key);
+    }
+
+    if (msg.content.startsWith("!reset")) {
+        const args = msg.content.split(" ");
+        const key = args[1];
+
+        if (!keys[key]) {
+            return msg.reply("❌ Key inválida");
+        }
+
+        keys[key].hwid = null;
+        msg.reply("🔄 Key resetada");
+    }
+});
+
 // ================= TESTE =================
 
 app.get("/", (req, res) => {
@@ -138,6 +176,9 @@ app.get("/", (req, res) => {
 // ================= START =================
 
 const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-    console.log("Rodando na porta " + PORT);
+    console.log("API rodando na porta " + PORT);
 });
+
+client.login(process.env.DISCORD_TOKEN);
