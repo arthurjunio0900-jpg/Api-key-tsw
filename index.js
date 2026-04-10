@@ -34,7 +34,11 @@ function saveKeys() {
     fs.writeFileSync(FILE, JSON.stringify(keys, null, 2));
 }
 
-// ================= GERAR KEY API =================
+// ================= API =================
+
+app.get("/", (req, res) => {
+    res.send("API PRO ONLINE 🔥");
+});
 
 app.get("/gerar", (req, res) => {
     const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -61,8 +65,6 @@ app.get("/gerar/tempo", (req, res) => {
 
     res.json({ key, tempo: tempo + "s" });
 });
-
-// ================= VERIFY =================
 
 app.post("/verify", (req, res) => {
     const { key, hwid } = req.body;
@@ -94,8 +96,6 @@ app.post("/verify", (req, res) => {
     return res.json({ status: "locked" });
 });
 
-// ================= RESET =================
-
 app.post("/reset", (req, res) => {
     const { key } = req.body;
 
@@ -107,19 +107,13 @@ app.post("/reset", (req, res) => {
     res.json({ status: "resetado" });
 });
 
-// ================= TESTE =================
-
-app.get("/", (req, res) => {
-    res.send("API PRO ONLINE 🔥");
-});
-
 // ================= BOT =================
 
 client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
 
-    // 🔐 SOMENTE VOCÊ
-    if (msg.author.id !== "SEU_ID_AQUI") return;
+    // 🔐 SÓ VOCÊ
+    if (msg.author.id !== "1092114875435724940") return;
 
     // 🔑 GERAR
     if (msg.content.startsWith("!gerar")) {
