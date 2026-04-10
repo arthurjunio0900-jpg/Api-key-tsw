@@ -1,10 +1,11 @@
 const express = require("express");
+const fs = require("fs");
 const { Client, GatewayIntentBits } = require("discord.js");
 
 const app = express();
 app.use(express.json());
 
-// ================= DISCORD BOT =================
+// ================= DISCORD =================
 
 const client = new Client({
     intents: [
@@ -20,62 +21,45 @@ client.once("ready", () => {
 
 // ================= BANCO =================
 
+const FILE = "keys.json";
+
 let keys = {};
 let logs = [];
-let requests = {};
 
-// ================= ANTI SPAM =================
-
-function checkSpam(user) {
-    if (!requests[user]) {
-        requests[user] = { count: 1, time: Date.now() };
-        return false;
-    }
-
-    let data = requests[user];
-
-    if (Date.now() - data.time > 10000) {
-        requests[user] = { count: 1, time: Date.now() };
-        return false;
-    }
-
-    data.count++;
-
-    if (data.count > 10) {
-        return true;
-    }
-
-    return false;
+if (fs.existsSync(FILE)) {
+    keys = JSON.parse(fs.readFileSync(FILE));
 }
 
-// ================= GERAR KEY =================
+function saveKeys() {
+    fs.writeFileSync(FILE, JSON.stringify(keys, null, 2));
+}
+
+// ================= GERAR KEY API =================
 
 app.get("/gerar", (req, res) => {
     const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
 
-    keys[key] = {
-        hwid: null,
-        expires: null
-    };
+    keys[key] = { hwid: null, expires: null };
+    saveKeys();
 
     res.json({ key });
 });
 
 app.get("/gerar/tempo", (req, res) => {
-    const duracao = parseInt(req.query.duracao);
+    const tempo = parseInt(req.query.duracao);
 
-    if (!duracao) {
-        return res.json({ status: "erro", msg: "use ?duracao=tempo" });
-    }
+    if (!tempo) return res.json({ erro: "use ?duracao=tempo" });
 
     const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
 
     keys[key] = {
         hwid: null,
-        expires: Date.now() + duracao * 1000
+        expires: Date.now() + tempo * 1000
     };
 
-    res.json({ key, tempo: duracao + "s" });
+    saveKeys();
+
+    res.json({ key, tempo: tempo + "s" });
 });
 
 // ================= VERIFY =================
@@ -83,17 +67,8 @@ app.get("/gerar/tempo", (req, res) => {
 app.post("/verify", (req, res) => {
     const { key, hwid } = req.body;
 
-    if (!key || !hwid) {
-        return res.json({ status: "error" });
-    }
-
-    if (checkSpam(hwid)) {
-        return res.json({ status: "spam" });
-    }
-
-    if (!keys[key]) {
-        return res.json({ status: "invalid" });
-    }
+    if (!key || !hwid) return res.json({ status: "error" });
+    if (!keys[key]) return res.json({ status: "invalid" });
 
     if (keys[key].expires && Date.now() > keys[key].expires) {
         return res.json({ status: "expired" });
@@ -108,6 +83,7 @@ app.post("/verify", (req, res) => {
             time: new Date().toLocaleString()
         });
 
+        saveKeys();
         return res.json({ status: "success" });
     }
 
@@ -123,54 +99,88 @@ app.post("/verify", (req, res) => {
 app.post("/reset", (req, res) => {
     const { key } = req.body;
 
-    if (!keys[key]) {
-        return res.json({ status: "invalid" });
-    }
+    if (!keys[key]) return res.json({ status: "invalid" });
 
     keys[key].hwid = null;
+    saveKeys();
 
-    return res.json({ status: "resetado" });
-});
-
-// ================= LOGS =================
-
-app.get("/logs", (req, res) => {
-    res.json(logs);
-});
-
-// ================= BOT COMANDOS =================
-
-client.on("messageCreate", async (msg) => {
-    if (msg.author.bot) return;
-
-    if (msg.content === "!gerar") {
-        const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-
-        keys[key] = {
-            hwid: null,
-            expires: null
-        };
-
-        msg.reply("🔑 Key: " + key);
-    }
-
-    if (msg.content.startsWith("!reset")) {
-        const args = msg.content.split(" ");
-        const key = args[1];
-
-        if (!keys[key]) {
-            return msg.reply("❌ Key inválida");
-        }
-
-        keys[key].hwid = null;
-        msg.reply("🔄 Key resetada");
-    }
+    res.json({ status: "resetado" });
 });
 
 // ================= TESTE =================
 
 app.get("/", (req, res) => {
     res.send("API PRO ONLINE 🔥");
+});
+
+// ================= BOT =================
+
+client.on("messageCreate", async (msg) => {
+    if (msg.author.bot) return;
+
+    // 🔐 SOMENTE VOCÊ
+    if (msg.author.id !== "SEU_ID_AQUI") return;
+
+    // 🔑 GERAR
+    if (msg.content.startsWith("!gerar")) {
+
+        const args = msg.content.split(" ");
+        const tempo = parseInt(args[1]) || 0;
+
+        const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+        keys[key] = {
+            hwid: null,
+            expires: tempo > 0 ? Date.now() + tempo * 1000 : null
+        };
+
+        saveKeys();
+
+        let t = tempo > 0 ? tempo + "s" : "♾️ Permanente";
+
+        msg.reply(`*** 🔑 Sua key:***  \`${key}\`\n*** ⏱️ Tempo:*** ${t}`);
+    }
+
+    // 🔄 RESET
+    if (msg.content.startsWith("!reset")) {
+
+        const args = msg.content.split(" ");
+        const key = args[1];
+
+        if (!key || !keys[key]) {
+            return msg.reply(`*** ❌ Key inválida***`);
+        }
+
+        keys[key].hwid = null;
+        saveKeys();
+
+        msg.reply(`*** 🔄 Key resetada***`);
+    }
+
+    // 📊 PAINEL
+    if (msg.content === "!painel") {
+
+        let texto = "*** 📊 Keys Ativas:***\n\n";
+        let count = 0;
+
+        for (let k in keys) {
+            const data = keys[k];
+
+            let tempo = "♾️";
+
+            if (data.expires) {
+                let restante = Math.floor((data.expires - Date.now()) / 1000);
+                tempo = restante > 0 ? restante + "s" : "EXPIRADA";
+            }
+
+            texto += `🔑 ${k}\n👤 ${data.hwid || "Ninguém"}\n⏱️ ${tempo}\n\n`;
+
+            count++;
+            if (count >= 5) break;
+        }
+
+        msg.reply(texto);
+    }
 });
 
 // ================= START =================
