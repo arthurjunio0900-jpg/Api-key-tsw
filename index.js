@@ -20,7 +20,7 @@ client.once("ready", () => {
     console.log("Bot online 🔥");
 });
 
-// ================= BANCO =================
+// ================= BANCO KEYS =================
 
 const FILE = "keys.json";
 
@@ -35,35 +35,70 @@ function saveKeys() {
     fs.writeFileSync(FILE, JSON.stringify(keys, null, 2));
 }
 
-// ================= IA GRATIS =================
+// ================= MEMÓRIA INSANA =================
 
-async function perguntarIA(pergunta) {
-    try {
-        const res = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
-            model: "mistralai/mistral-7b-instruct",
-            messages: [
-                {
-                    role: "system",
-                    content: "Você é uma IA amigável, responde tudo de forma simples, direta e sem frescura."
-                },
-                {
-                    role: "user",
-                    content: pergunta
-                }
-            ]
-        }, {
-            headers: {
-                "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
-                "Content-Type": "application/json"
-            }
-        });
+const MEMORY_FILE = "memory.json";
 
-        return res.data.choices[0].message.content;
+let memory = {};
 
-    } catch (err) {
-        console.log(err.response?.data || err.message);
-        return "Erro na IA 😢";
+if (fs.existsSync(MEMORY_FILE)) {
+    memory = JSON.parse(fs.readFileSync(MEMORY_FILE));
+}
+
+function saveMemory() {
+    fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2));
+}
+
+// ================= IA =================
+
+async function perguntarIA(userId, pergunta) {
+    if (!memory[userId]) {
+        memory[userId] = [];
     }
+
+    memory[userId].push({ role: "user", content: pergunta });
+
+    if (memory[userId].length > 20) {
+        memory[userId] = memory[userId].slice(-20);
+    }
+
+    const modelos = [
+        "mistralai/mistral-7b-instruct:free",
+        "openchat/openchat-7b:free",
+        "gryphe/mythomist-7b:free"
+    ];
+
+    for (let model of modelos) {
+        try {
+            const res = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
+                model: model,
+                messages: [
+                    {
+                        role: "system",
+                        content: "Você é uma IA extremamente inteligente, conversa como humano, lembra do contexto e responde de forma natural, clara e útil."
+                    },
+                    ...memory[userId]
+                ]
+            }, {
+                headers: {
+                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                    "Content-Type": "application/json"
+                }
+            });
+
+            const resposta = res.data.choices[0].message.content;
+
+            memory[userId].push({ role: "assistant", content: resposta });
+            saveMemory();
+
+            return resposta;
+
+        } catch (err) {
+            console.log("Erro no modelo:", model);
+        }
+    }
+
+    return "IA ocupada 😢 tenta novamente";
 }
 
 // ================= API =================
@@ -144,10 +179,10 @@ app.post("/reset", (req, res) => {
 client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
 
-    // 🔐 SÓ VOCÊ
+    // 🔐 só você
     if (msg.author.id !== "1092114875435724940") return;
 
-    // 🔑 GERAR
+    // 🔑 GERAR KEY
     if (msg.content.startsWith("!gerar")) {
         const args = msg.content.split(" ");
         const tempo = parseInt(args[1]) || 0;
@@ -166,10 +201,9 @@ client.on("messageCreate", async (msg) => {
         msg.reply(`🔑 Key: \`${key}\`\n⏱️ Tempo: ${t}`);
     }
 
-    // 🔄 RESET
+    // 🔄 RESET KEY
     if (msg.content.startsWith("!reset")) {
-        const args = msg.content.split(" ");
-        const key = args[1];
+        const key = msg.content.split(" ")[1];
 
         if (!key || !keys[key]) {
             return msg.reply("❌ Key inválida");
@@ -205,16 +239,23 @@ client.on("messageCreate", async (msg) => {
         msg.reply(texto);
     }
 
-    // 🤖 IA
+    // 🤖 IA COM MEMÓRIA
     if (msg.content.startsWith("!ia")) {
         const pergunta = msg.content.replace("!ia ", "");
 
         if (!pergunta) {
-            return msg.reply("Fala algo pra IA 🤖");
+            return msg.reply("Fala algo 🤖");
         }
 
-        const resposta = await perguntarIA(pergunta);
+        const resposta = await perguntarIA(msg.author.id, pergunta);
         msg.reply(resposta);
+    }
+
+    // 🧠 RESET MEMÓRIA
+    if (msg.content === "!resetia") {
+        memory[msg.author.id] = [];
+        saveMemory();
+        msg.reply("Memória apagada 🧠");
     }
 });
 
