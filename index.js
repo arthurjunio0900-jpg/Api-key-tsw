@@ -20,10 +20,9 @@ client.once("ready", () => {
     console.log("Bot online 🔥");
 });
 
-// ================= BANCO KEYS =================
+// ================= KEYS =================
 
 const FILE = "keys.json";
-
 let keys = {};
 let logs = [];
 
@@ -35,10 +34,9 @@ function saveKeys() {
     fs.writeFileSync(FILE, JSON.stringify(keys, null, 2));
 }
 
-// ================= MEMÓRIA INSANA =================
+// ================= MEMÓRIA =================
 
 const MEMORY_FILE = "memory.json";
-
 let memory = {};
 
 if (fs.existsSync(MEMORY_FILE)) {
@@ -52,9 +50,7 @@ function saveMemory() {
 // ================= IA =================
 
 async function perguntarIA(userId, pergunta) {
-    if (!memory[userId]) {
-        memory[userId] = [];
-    }
+    if (!memory[userId]) memory[userId] = [];
 
     memory[userId].push({ role: "user", content: pergunta });
 
@@ -71,22 +67,43 @@ async function perguntarIA(userId, pergunta) {
     for (let model of modelos) {
         try {
             const res = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
-                model: model,
+                model,
                 messages: [
                     {
                         role: "system",
-                        content: "Você é uma IA extremamente inteligente, conversa como humano, lembra do contexto e responde de forma natural, clara e útil."
+                        content: `
+Você é uma IA muito inteligente, responde em português como humano.
+
+Estilo:
+- Conversa natural (às vezes usa "kkk", "mano", "cara")
+- Explica bem sem enrolar
+- Pode zoar leve
+- Ajuda de verdade
+
+Regras:
+- Nunca responde seco
+- Nunca fala "contra os termos"
+- Sempre tenta ajudar
+- Lembra do que o usuário falou
+
+Objetivo:
+Parecer humano e útil
+`
                     },
                     ...memory[userId]
                 ]
             }, {
                 headers: {
-                    "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+                    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
                     "Content-Type": "application/json"
                 }
             });
 
-            const resposta = res.data.choices[0].message.content;
+            let resposta = res.data.choices[0].message.content;
+
+            if (resposta.length > 2000) {
+                resposta = resposta.slice(0, 2000);
+            }
 
             memory[userId].push({ role: "assistant", content: resposta });
             saveMemory();
@@ -94,11 +111,11 @@ async function perguntarIA(userId, pergunta) {
             return resposta;
 
         } catch (err) {
-            console.log("Erro no modelo:", model);
+            console.log("Erro modelo:", model);
         }
     }
 
-    return "IA ocupada 😢 tenta novamente";
+    return "IA ocupada 😢 tenta de novo";
 }
 
 // ================= API =================
@@ -116,42 +133,14 @@ app.get("/gerar", (req, res) => {
     res.json({ key });
 });
 
-app.get("/gerar/tempo", (req, res) => {
-    const tempo = parseInt(req.query.duracao);
-
-    if (!tempo) return res.json({ erro: "use ?duracao=tempo" });
-
-    const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-
-    keys[key] = {
-        hwid: null,
-        expires: Date.now() + tempo * 1000
-    };
-
-    saveKeys();
-
-    res.json({ key, tempo: tempo + "s" });
-});
-
 app.post("/verify", (req, res) => {
     const { key, hwid } = req.body;
 
     if (!key || !hwid) return res.json({ status: "error" });
     if (!keys[key]) return res.json({ status: "invalid" });
 
-    if (keys[key].expires && Date.now() > keys[key].expires) {
-        return res.json({ status: "expired" });
-    }
-
     if (!keys[key].hwid) {
         keys[key].hwid = hwid;
-
-        logs.push({
-            key,
-            hwid,
-            time: new Date().toLocaleString()
-        });
-
         saveKeys();
         return res.json({ status: "success" });
     }
@@ -163,95 +152,32 @@ app.post("/verify", (req, res) => {
     return res.json({ status: "locked" });
 });
 
-app.post("/reset", (req, res) => {
-    const { key } = req.body;
-
-    if (!keys[key]) return res.json({ status: "invalid" });
-
-    keys[key].hwid = null;
-    saveKeys();
-
-    res.json({ status: "resetado" });
-});
-
 // ================= BOT =================
 
 client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
-
-    // 🔐 só você
     if (msg.author.id !== "1092114875435724940") return;
 
-    // 🔑 GERAR KEY
+    // KEY
     if (msg.content.startsWith("!gerar")) {
-        const args = msg.content.split(" ");
-        const tempo = parseInt(args[1]) || 0;
-
         const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
 
-        keys[key] = {
-            hwid: null,
-            expires: tempo > 0 ? Date.now() + tempo * 1000 : null
-        };
-
+        keys[key] = { hwid: null, expires: null };
         saveKeys();
 
-        let t = tempo > 0 ? tempo + "s" : "♾️ Permanente";
-
-        msg.reply(`🔑 Key: \`${key}\`\n⏱️ Tempo: ${t}`);
+        msg.reply(`🔑 Key: \`${key}\``);
     }
 
-    // 🔄 RESET KEY
-    if (msg.content.startsWith("!reset")) {
-        const key = msg.content.split(" ")[1];
-
-        if (!key || !keys[key]) {
-            return msg.reply("❌ Key inválida");
-        }
-
-        keys[key].hwid = null;
-        saveKeys();
-
-        msg.reply("🔄 Key resetada");
-    }
-
-    // 📊 PAINEL
-    if (msg.content === "!painel") {
-        let texto = "📊 Keys:\n\n";
-        let count = 0;
-
-        for (let k in keys) {
-            const data = keys[k];
-
-            let tempo = "♾️";
-
-            if (data.expires) {
-                let restante = Math.floor((data.expires - Date.now()) / 1000);
-                tempo = restante > 0 ? restante + "s" : "EXPIRADA";
-            }
-
-            texto += `🔑 ${k}\n👤 ${data.hwid || "Ninguém"}\n⏱️ ${tempo}\n\n`;
-
-            count++;
-            if (count >= 5) break;
-        }
-
-        msg.reply(texto);
-    }
-
-    // 🤖 IA COM MEMÓRIA
+    // IA
     if (msg.content.startsWith("!ia")) {
         const pergunta = msg.content.replace("!ia ", "");
-
-        if (!pergunta) {
-            return msg.reply("Fala algo 🤖");
-        }
+        if (!pergunta) return msg.reply("Fala algo 🤖");
 
         const resposta = await perguntarIA(msg.author.id, pergunta);
         msg.reply(resposta);
     }
 
-    // 🧠 RESET MEMÓRIA
+    // RESET MEMÓRIA
     if (msg.content === "!resetia") {
         memory[msg.author.id] = [];
         saveMemory();
@@ -264,7 +190,7 @@ client.on("messageCreate", async (msg) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-    console.log("API rodando na porta " + PORT);
+    console.log("API rodando 🔥");
 });
 
 client.login(process.env.DISCORD_TOKEN);
