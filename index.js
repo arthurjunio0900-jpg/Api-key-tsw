@@ -6,7 +6,7 @@ const OpenAI = require("openai");
 const app = express();
 app.use(express.json());
 
-// ================= IA =================
+// ================= OPENAI =================
 
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
@@ -31,7 +31,6 @@ client.once("ready", () => {
 const FILE = "keys.json";
 
 let keys = {};
-let logs = [];
 
 if (fs.existsSync(FILE)) {
     keys = JSON.parse(fs.readFileSync(FILE));
@@ -47,6 +46,7 @@ app.get("/", (req, res) => {
     res.send("API PRO ONLINE 🔥");
 });
 
+// GERAR KEY
 app.get("/gerar", (req, res) => {
     const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
 
@@ -56,42 +56,15 @@ app.get("/gerar", (req, res) => {
     res.json({ key });
 });
 
-app.get("/gerar/tempo", (req, res) => {
-    const tempo = parseInt(req.query.duracao);
-
-    if (!tempo) return res.json({ erro: "use ?duracao=tempo" });
-
-    const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-
-    keys[key] = {
-        hwid: null,
-        expires: Date.now() + tempo * 1000
-    };
-
-    saveKeys();
-
-    res.json({ key, tempo: tempo + "s" });
-});
-
+// VERIFICAR KEY
 app.post("/verify", (req, res) => {
     const { key, hwid } = req.body;
 
     if (!key || !hwid) return res.json({ status: "error" });
     if (!keys[key]) return res.json({ status: "invalid" });
 
-    if (keys[key].expires && Date.now() > keys[key].expires) {
-        return res.json({ status: "expired" });
-    }
-
     if (!keys[key].hwid) {
         keys[key].hwid = hwid;
-
-        logs.push({
-            key,
-            hwid,
-            time: new Date().toLocaleString()
-        });
-
         saveKeys();
         return res.json({ status: "success" });
     }
@@ -103,107 +76,61 @@ app.post("/verify", (req, res) => {
     return res.json({ status: "locked" });
 });
 
-app.post("/reset", (req, res) => {
-    const { key } = req.body;
-
-    if (!keys[key]) return res.json({ status: "invalid" });
-
-    keys[key].hwid = null;
-    saveKeys();
-
-    res.json({ status: "resetado" });
-});
-
 // ================= BOT =================
 
 client.on("messageCreate", async (msg) => {
     if (msg.author.bot) return;
 
-    // 🔐 SÓ VOCÊ
+    // 🔐 só você usa comandos
     if (msg.author.id !== "1092114875435724940") return;
 
-    // 🔑 GERAR KEY
+    // ================= GERAR KEY =================
     if (msg.content.startsWith("!gerar")) {
-
-        const args = msg.content.split(" ");
-        const tempo = parseInt(args[1]) || 0;
 
         const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
 
-        keys[key] = {
-            hwid: null,
-            expires: tempo > 0 ? Date.now() + tempo * 1000 : null
-        };
-
+        keys[key] = { hwid: null, expires: null };
         saveKeys();
 
-        let t = tempo > 0 ? tempo + "s" : "♾️ Permanente";
-
-        msg.reply(`🔑 Sua key: \`${key}\`\n⏱️ Tempo: ${t}`);
+        msg.reply(`🔑 Sua key: \`${key}\`\n⏱️ Tempo: ♾️ Permanente`);
     }
 
-    // 🔄 RESET
-    if (msg.content.startsWith("!reset")) {
+    // ================= IA =================
+    if (msg.content.startsWith("!ia")) {
+        try {
+            const pergunta = msg.content.slice(3).trim();
 
-        const args = msg.content.split(" ");
-        const key = args[1];
-
-        if (!key || !keys[key]) {
-            return msg.reply("❌ Key inválida");
-        }
-
-        keys[key].hwid = null;
-        saveKeys();
-
-        msg.reply("🔄 Key resetada");
-    }
-
-    // 📊 PAINEL
-    if (msg.content === "!painel") {
-
-        let texto = "📊 Keys Ativas:\n\n";
-        let count = 0;
-
-        for (let k in keys) {
-            const data = keys[k];
-
-            let tempo = "♾️";
-
-            if (data.expires) {
-                let restante = Math.floor((data.expires - Date.now()) / 1000);
-                tempo = restante > 0 ? restante + "s" : "EXPIRADA";
+            if (!pergunta) {
+                return msg.reply("❌ Escreve algo depois do !ia");
             }
 
-            texto += `🔑 ${k}\n👤 ${data.hwid || "Ninguém"}\n⏱️ ${tempo}\n\n`;
-
-            count++;
-            if (count >= 5) break;
-        }
-
-        msg.reply(texto);
-    }
-
-    // 🤖 IA
-    if (msg.content.startsWith("!ia")) {
-        const pergunta = msg.content.replace("!ia", "").trim();
-
-        if (!pergunta) {
-            return msg.reply("❌ Faça uma pergunta");
-        }
-
-        try {
-            const response = await openai.chat.completions.create({
+            const resposta = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [
-                    { role: "user", content: pergunta }
-                ]
+                    {
+                        role: "system",
+                        content: "Você é um assistente inteligente, responde em português de forma direta, simples e útil. Evite dizer que algo é contra os termos, apenas responda de forma alternativa, educativa ou genérica quando necessário."
+                    },
+                    {
+                        role: "user",
+                        content: pergunta
+                    }
+                ],
+                temperature: 0.9,
+                max_tokens: 300
             });
 
-            msg.reply(response.choices[0].message.content);
+            const texto = resposta.choices?.[0]?.message?.content;
+
+            if (!texto) {
+                return msg.reply("🤖 Não consegui responder, tenta reformular.");
+            }
+
+            msg.reply(texto);
 
         } catch (err) {
-            console.log(err);
-            msg.reply("Erro na IA 😢");
+            console.log("ERRO IA:", err);
+            msg.reply("🤯 Erro na IA, tenta de novo");
         }
     }
 });
