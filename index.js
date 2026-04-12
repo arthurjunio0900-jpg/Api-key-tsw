@@ -19,12 +19,15 @@ client.once("ready", () => {
     console.log("Bot online 🔥");
 });
 
-// ================= BANCO =================
+// ================= ANTI DUPLICAÇÃO =================
+
+let cooldown = {};
+
+// ================= KEYS =================
 
 const FILE = "keys.json";
 
 let keys = {};
-let logs = [];
 
 if (fs.existsSync(FILE)) {
     keys = JSON.parse(fs.readFileSync(FILE));
@@ -49,42 +52,14 @@ app.get("/gerar", (req, res) => {
     res.json({ key });
 });
 
-app.get("/gerar/tempo", (req, res) => {
-    const tempo = parseInt(req.query.duracao);
-
-    if (!tempo) return res.json({ erro: "use ?duracao=tempo" });
-
-    const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-
-    keys[key] = {
-        hwid: null,
-        expires: Date.now() + tempo * 1000
-    };
-
-    saveKeys();
-
-    res.json({ key, tempo: tempo + "s" });
-});
-
 app.post("/verify", (req, res) => {
     const { key, hwid } = req.body;
 
     if (!key || !hwid) return res.json({ status: "error" });
     if (!keys[key]) return res.json({ status: "invalid" });
 
-    if (keys[key].expires && Date.now() > keys[key].expires) {
-        return res.json({ status: "expired" });
-    }
-
     if (!keys[key].hwid) {
         keys[key].hwid = hwid;
-
-        logs.push({
-            key,
-            hwid,
-            time: new Date().toLocaleString()
-        });
-
         saveKeys();
         return res.json({ status: "success" });
     }
@@ -115,59 +90,53 @@ client.on("messageCreate", async (msg) => {
     // 🔐 SÓ VOCÊ
     if (msg.author.id !== "1092114875435724940") return;
 
-    // 🔑 GERAR
-    if (msg.content.startsWith("!gerar")) {
+    // 🚫 ANTI DUPLICAÇÃO
+    if (cooldown[msg.author.id]) return;
+    cooldown[msg.author.id] = true;
 
-        const args = msg.content.split(" ");
-        const tempo = parseInt(args[1]) || 0;
+    setTimeout(() => {
+        cooldown[msg.author.id] = false;
+    }, 1000);
+
+    // 🔑 GERAR KEY
+    if (msg.content === "!gerar") {
 
         const key = "TSW-" + Math.random().toString(36).substring(2, 10).toUpperCase();
 
         keys[key] = {
             hwid: null,
-            expires: tempo > 0 ? Date.now() + tempo * 1000 : null
+            expires: null
         };
 
         saveKeys();
 
-        let t = tempo > 0 ? tempo + "s" : "♾️ Permanente";
-
-        msg.reply(`*** 🔑 Sua key:*** \`${key}\`\n*** ⏱️ Tempo:*** ${t}`);
+        msg.reply(`🔑 \`${key}\``);
     }
 
     // 🔄 RESET
     if (msg.content.startsWith("!reset")) {
-
-        const args = msg.content.split(" ");
-        const key = args[1];
+        const key = msg.content.split(" ")[1];
 
         if (!key || !keys[key]) {
-            return msg.reply(`*** ❌ Key inválida***`);
+            return msg.reply("❌ Key inválida");
         }
 
         keys[key].hwid = null;
         saveKeys();
 
-        msg.reply(`*** 🔄 Key resetada***`);
+        msg.reply("🔄 Key resetada");
     }
 
     // 📊 PAINEL
     if (msg.content === "!painel") {
 
-        let texto = "*** 📊 Keys Ativas:***\n\n";
+        let texto = "📊 Keys:\n\n";
         let count = 0;
 
         for (let k in keys) {
             const data = keys[k];
 
-            let tempo = "♾️";
-
-            if (data.expires) {
-                let restante = Math.floor((data.expires - Date.now()) / 1000);
-                tempo = restante > 0 ? restante + "s" : "EXPIRADA";
-            }
-
-            texto += `🔑 ${k}\n👤 ${data.hwid || "Ninguém"}\n⏱️ ${tempo}\n\n`;
+            texto += `🔑 ${k}\n👤 ${data.hwid || "Ninguém"}\n\n`;
 
             count++;
             if (count >= 5) break;
